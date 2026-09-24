@@ -131,6 +131,19 @@ h3.sec:first-child{margin-top:4px}
 #save:disabled{opacity:.5}
 .emptycart{text-align:center;color:var(--ink3);font-size:1rem;padding:6px 0 4px}
 
+/* ---------- แถบวันที่ทำงาน ---------- */
+#daybar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;padding:11px 13px;
+  border-radius:12px;background:var(--surface);border:1.5px solid var(--line);font-size:.95rem}
+#daybar.back{background:#fff1d6;border-color:#d99a2b;color:#6b4408}
+:root[data-theme="dark"] #daybar.back{background:#3a2a0c;border-color:#8a6a1e;color:#f0d9a8}
+#daybar .dtxt{flex:1;min-width:0;line-height:1.3}
+#daybar .dtxt b{display:block}
+#daybar button{flex:0 0 auto;margin-left:auto;padding:9px 14px;border-radius:9px;background:var(--surface2);color:var(--ink);
+  border:1px solid var(--line);font-size:.9rem;white-space:nowrap}
+#daybar.back button{background:#d99a2b;color:#2a1606;border-color:#d99a2b;font-weight:700}
+#daypick{width:100%;margin-bottom:12px;padding:13px;border-radius:12px;background:var(--surface);
+  border:1.5px solid var(--gold);color:var(--ink);font-size:1.05rem}
+
 /* ---------- BILLS ---------- */
 .bill{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);
   padding:12px 13px;margin-bottom:9px}
@@ -214,7 +227,7 @@ table.t td.g{color:var(--gold);font-weight:700}
 .mbtns button{flex:1;padding:12px;border-radius:11px;font-size:.95rem}
 .mbtns .no{background:var(--surface2);color:var(--ink)}
 .mbtns .yes{background:var(--red);color:#fff;font-weight:700}
-#toast{position:fixed;left:50%;transform:translateX(-50%);bottom:auto;top:70px;z-index:95;
+#toast{position:fixed;left:50%;transform:translateX(-50%);top:auto;bottom:calc(var(--cartpad,150px) + 10px);z-index:95;
   background:var(--toastbg);border:1px solid var(--toastline);color:var(--toastink);padding:12px 20px;border-radius:12px;
   font-size:1rem;font-weight:500;box-shadow:0 6px 20px rgba(0,0,0,.5);max-width:90%;text-align:center}
 @media (min-width:700px){ .kpis{grid-template-columns:1fr 1fr 1fr} }
@@ -251,13 +264,17 @@ table.t td.g{color:var(--gold);font-weight:700}
   </nav>
 
   <main>
+    <!-- ---- แถบวันที่ที่กำลังบันทึก ---- -->
+    <div id="daybar"></div>
+    <input type="date" id="daypick" class="hide">
+
     <!-- ---- SELL ---- -->
     <section id="tab-sell"><div id="menu"></div></section>
 
     <!-- ---- BILLS ---- -->
     <section id="tab-bills" class="hide">
       <div class="kpis" style="margin-bottom:14px">
-        <div class="kpi"><div class="lb">ยอดวันนี้</div><div class="vl" id="bToday">0</div></div>
+        <div class="kpi"><div class="lb" id="bDayLabel">ยอดวันนี้</div><div class="vl" id="bToday">0</div></div>
         <div class="kpi"><div class="lb">จำนวนบิล</div><div class="vl" id="bCount">0</div></div>
       </div>
       <div id="billlist"></div>
@@ -352,6 +369,7 @@ const DEFAULT_ITEMS = [
 
 /* =================== สถานะ =================== */
 let ITEMS=[], SALES=[], cart=[], payMode='cash', saving=false;
+let workDay=null;   // วันที่ที่กำลังบันทึกบิล (null = วันนี้) ไม่เก็บถาวร รีเฟรชแล้วกลับเป็นวันนี้เสมอ
 let range={type:'today', val:null};
 let fb=null; // {db, addDoc, ...}
 
@@ -362,6 +380,14 @@ const money = n=>Math.round(n).toLocaleString('th-TH');
 const pad = n=>String(n).padStart(2,'0');
 const dkey = d=>d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
 const esc = s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const TH_MONTH=['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+function thaiDate(key){                     // "2026-09-20" -> "20 ก.ย. 2569"
+  const [y,m,d]=key.split('-').map(Number);
+  return d+' '+TH_MONTH[m-1]+' '+(y+543);
+}
+function activeDay(){ return workDay || dkey(new Date()); }
+function isBackdated(){ return !!workDay && workDay!==dkey(new Date()); }
+
 function toast(msg){
   const t=document.createElement('div'); t.id='toast'; t.textContent=msg;
   document.body.appendChild(t); setTimeout(()=>t.remove(),2400);
@@ -494,10 +520,15 @@ async function saveBill(){
   if(saving || !cart.length) return;
   saving=true; $('#save').disabled=true; $('#save').textContent='กำลังบันทึก…';
   const now=new Date();
+  // ย้อนหลัง: ตั้งเวลาเป็นเที่ยงของวันนั้น เพื่อไม่ให้เพี้ยนตอนแปลงโซนเวลา
+  const stamp = isBackdated()
+    ? new Date(+workDay.slice(0,4), +workDay.slice(5,7)-1, +workDay.slice(8,10), 12, 0, 0)
+    : now;
   const bill={
     id:'B'+now.getTime()+Math.random().toString(36).slice(2,6),
-    ts:now.toISOString(),
-    day:dkey(now),
+    ts:stamp.toISOString(),
+    day:activeDay(),
+    backdated: isBackdated() || undefined,
     items:cart.map(c=>({id:c.id,name:c.name,price:c.price,qty:c.qty,cat:c.cat})),
     total:cart.reduce((s,c)=>s+c.price*c.qty,0),
     pay:payMode,
@@ -506,7 +537,8 @@ async function saveBill(){
   SALES.unshift(bill); saveSalesLocal();
   await pushSale(bill);
   cart=[]; renderMenu(); renderCart(); refreshAll();
-  toast('บันทึกแล้ว '+money(bill.total)+' ฿');
+  toast(isBackdated() ? ('บันทึกลงวันที่ '+thaiDate(workDay)+' แล้ว '+money(bill.total)+' ฿')
+                      : ('บันทึกแล้ว '+money(bill.total)+' ฿'));
   saving=false; $('#save').textContent='บันทึกบิล'; $('#save').disabled=true;
 }
 function voidBill(id){
@@ -515,14 +547,39 @@ function voidBill(id){
   saveSalesLocal(); pushVoid(b); refreshAll(); toast('ยกเลิกบิลแล้ว');
 }
 
-/* =================== บิลวันนี้ =================== */
-function todaySales(){ const k=dkey(new Date()); return SALES.filter(s=>s.day===k); }
+/* =================== แถบวันที่ที่กำลังบันทึก =================== */
+function renderDaybar(){
+  const bar=$('#daybar');
+  if(isBackdated()){
+    bar.classList.add('back');
+    bar.innerHTML='<span class="dtxt"><b>⏪ กำลังบันทึกย้อนหลัง</b>บิลจะลงวันที่ '+esc(thaiDate(workDay))+'</span>'+
+                  '<button data-day="today">กลับมาวันนี้</button>';
+  } else {
+    bar.classList.remove('back');
+    bar.innerHTML='<span class="dtxt">📅 บันทึกลงวันที่ <b>วันนี้ · '+esc(thaiDate(dkey(new Date())))+'</b></span>'+
+                  '<button data-day="pick">เปลี่ยนวัน</button>';
+  }
+}
+function setWorkDay(key){
+  const today=dkey(new Date());
+  workDay = (!key || key===today) ? null : key;
+  $('#daypick').classList.add('hide');
+  renderDaybar(); renderBills(); refreshAll();
+}
+
+/* =================== บิลของวันที่ทำงาน =================== */
+function todaySales(){ const k=activeDay(); return SALES.filter(s=>s.day===k); }
 function renderBills(){
   const t=todaySales();
   const live=t.filter(s=>!s.void);
+  const lb=$('#bDayLabel');
+  if(lb) lb.textContent = isBackdated() ? ('ยอดวันที่ '+thaiDate(workDay)) : 'ยอดวันนี้';
   $('#bToday').textContent=money(live.reduce((s,b)=>s+b.total,0))+' ฿';
   $('#bCount').textContent=live.length;
-  if(!t.length){ $('#billlist').innerHTML='<p class="note" style="text-align:center">ยังไม่มีบิลวันนี้</p>'; return; }
+  if(!t.length){
+    $('#billlist').innerHTML='<p class="note" style="text-align:center">ยังไม่มีบิลของวันที่ '+esc(thaiDate(activeDay()))+'</p>';
+    return;
+  }
   $('#billlist').innerHTML=t.map(b=>{
     const d=new Date(b.ts);
     const its=b.items.map(i=>esc(i.name)+(i.qty>1?' ×'+i.qty:'')).join(' · ');
@@ -721,8 +778,10 @@ function saveItems(){
 /* =================== แท็บ / รีเฟรช =================== */
 function refreshAll(){
   const live=todaySales().filter(s=>!s.void);
-  $('#hToday').textContent=money(live.reduce((s,b)=>s+b.total,0))+' ฿';
-  $('#hBills').textContent=live.length;
+  const sum=live.reduce((s,b)=>s+b.total,0);
+  const hs=document.querySelector('.hstat');
+  if(hs) hs.innerHTML='<b id="hToday">'+money(sum)+' ฿</b>'+
+    (isBackdated()? esc(thaiDate(workDay)) : 'วันนี้')+' · <span id="hBills">'+live.length+'</span> บิล';
   renderBills();
   if(!$('#tab-report').classList.contains('hide')) renderReport();
 }
@@ -731,6 +790,10 @@ function showTab(t){
   ['sell','bills','report','settings'].forEach(k=>
     $('#tab-'+k).classList.toggle('hide', k!==t));
   $('#cartbar').classList.toggle('hide', t!=='sell');
+  const showDay = (t==='sell' || t==='bills');
+  $('#daybar').classList.toggle('hide', !showDay);
+  if(!showDay) $('#daypick').classList.add('hide');
+  if(showDay) renderDaybar();
   syncCartPad();
   if(t==='bills') renderBills();
   if(t==='report'){ renderPickRow(); renderReport(); }
@@ -763,7 +826,7 @@ setInterval(()=>{
 async function startApp(){
   $('#login').classList.add('hide');
   $('#app').classList.remove('hide');
-  renderMenu(); renderCart(); refreshAll(); syncCartPad();
+  renderMenu(); renderCart(); renderDaybar(); refreshAll(); syncCartPad();
   const ok=await initFirebase();
   if(ok){ renderMenu(); refreshAll(); renderSettings(); }
   else toast('เชื่อมคลาวด์ไม่ได้ ใช้ข้อมูลในเครื่องนี้ก่อน');
@@ -805,6 +868,22 @@ $$('.paysel button').forEach(b=>b.onclick=()=>{
   $$('.paysel button').forEach(x=>x.classList.toggle('on',x===b));
 });
 $('#save').onclick=saveBill;
+$('#daybar').addEventListener('click',e=>{
+  const b=e.target.closest('[data-day]'); if(!b) return;
+  if(b.dataset.day==='today'){ setWorkDay(null); toast('กลับมาบันทึกของวันนี้แล้ว'); return; }
+  const pick=$('#daypick');
+  pick.max = dkey(new Date());          // ห้ามเลือกวันในอนาคต
+  pick.value = activeDay();
+  pick.classList.toggle('hide');
+  if(!pick.classList.contains('hide')) pick.focus();
+});
+$('#daypick').addEventListener('change',e=>{
+  const v=e.target.value;
+  if(!v) return;
+  if(v > dkey(new Date())){ toast('เลือกวันในอนาคตไม่ได้'); return; }
+  setWorkDay(v);
+  if(v!==dkey(new Date())) toast('เปลี่ยนเป็นบันทึกย้อนหลังวันที่ '+thaiDate(v));
+});
 $('#billlist').addEventListener('click',e=>{
   const b=e.target.closest('[data-void]'); if(!b) return;
   confirmBox('ยกเลิกบิลใบนี้ใช่ไหม ยอดจะไม่ถูกนับในรายงาน', ()=>voidBill(b.dataset.void));
