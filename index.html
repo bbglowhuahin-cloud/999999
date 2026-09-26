@@ -131,6 +131,14 @@ h3.sec:first-child{margin-top:4px}
 #save:disabled{opacity:.5}
 .emptycart{text-align:center;color:var(--ink3);font-size:1rem;padding:6px 0 4px}
 
+/* ---------- แถบบิลค้างส่ง ---------- */
+#pendbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;padding:11px 13px;
+  border-radius:12px;background:#ffe9d6;border:1.5px solid #cf6a2b;color:#6b3208;font-size:.95rem}
+:root[data-theme="dark"] #pendbar{background:#3a1f0c;border-color:#8a4a1e;color:#f5cfa8}
+#pendbar span{flex:1;min-width:0}
+#pendbar button{flex:0 0 auto;padding:9px 14px;border-radius:9px;background:#cf6a2b;color:#fff;
+  font-size:.9rem;font-weight:700;white-space:nowrap}
+
 /* ---------- แถบวันที่ทำงาน ---------- */
 #daybar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;padding:11px 13px;
   border-radius:12px;background:var(--surface);border:1.5px solid var(--line);font-size:.95rem}
@@ -273,6 +281,9 @@ table.t td.g{color:var(--gold);font-weight:700}
   </nav>
 
   <main>
+    <!-- ---- แถบบิลที่ยังไม่ได้ส่งขึ้นคลาวด์ ---- -->
+    <div id="pendbar" class="hide"></div>
+
     <!-- ---- แถบวันที่ที่กำลังบันทึก ---- -->
     <div id="daybar"></div>
     <input type="date" id="daypick" class="hide">
@@ -475,8 +486,17 @@ async function initFirebase(){
     const db=f.getFirestore(app);
     fb={db, f};
     const snap=await f.getDocs(f.query(f.collection(db,'samnak_sales'), f.orderBy('ts','desc'), f.limit(3000)));
-    const rows=[]; snap.forEach(d=>rows.push({...d.data(), _fid:d.id}));
-    if(rows.length){ SALES=rows; saveSalesLocal(); }
+    const cloud=[]; snap.forEach(d=>cloud.push({...d.data(), _fid:d.id}));
+    // ⚠️ ห้ามเอาข้อมูลคลาวด์ทับของในเครื่องดื้อ ๆ — บิลที่เพิ่งลงระหว่างรอเชื่อมต่อจะหาย
+    const byId = new Map();
+    cloud.forEach(b=>{ if(b && b.id) byId.set(b.id, b); });
+    SALES.forEach(local=>{
+      if(!local || !local.id) return;
+      if(local._dirty || !byId.has(local.id)) byId.set(local.id, local);   // ของในเครื่องที่ยังไม่ได้ส่ง = ตัวจริง
+    });
+    SALES = [...byId.values()].sort((a,b)=>String(b.ts).localeCompare(String(a.ts)));
+    saveSalesLocal();
+    flushPending();                       // ส่งบิลที่ค้างขึ้นคลาวด์ทันที
     const cfgSnap=await f.getDocs(f.collection(db,'samnak_config'));
     cfgSnap.forEach(d=>{ if(d.id==='items' && Array.isArray(d.data().list) && d.data().list.length){
       ITEMS=d.data().list;
@@ -486,15 +506,39 @@ async function initFirebase(){
     return true;
   }catch(e){ console.warn('firebase off:',e); fb=null; return false; }
 }
+// ส่งบิลขึ้นคลาวด์ด้วย id คงที่ → ส่งซ้ำกี่ครั้งก็ไม่เกิดบิลซ้ำ
 async function pushSale(bill){
-  if(!fb) return;
-  try{ const r=await fb.f.addDoc(fb.f.collection(fb.db,'samnak_sales'), bill); bill._fid=r.id; saveSalesLocal(); }
-  catch(e){ console.warn('push fail',e); }
+  if(!fb){ updatePendingBadge(); return false; }
+  const docId = bill._fid || bill.id;
+  try{
+    const clean = {...bill}; delete clean._dirty;
+    await fb.f.setDoc(fb.f.doc(fb.db,'samnak_sales',docId), clean, {merge:true});
+    delete bill._dirty; bill._fid = docId;
+    saveSalesLocal(); updatePendingBadge();
+    return true;
+  }catch(e){ console.warn('push fail',e); updatePendingBadge(); return false; }
 }
-async function pushVoid(bill){
-  if(!fb || !bill._fid) return;
-  try{ await fb.f.updateDoc(fb.f.doc(fb.db,'samnak_sales',bill._fid), {void:true, voidAt:bill.voidAt}); }
-  catch(e){ console.warn('void sync fail',e); }
+
+// ส่งบิลที่ยังค้างอยู่ทั้งหมด (ลงตอนเน็ตไม่มา / ตอนแอปยังเชื่อมคลาวด์ไม่เสร็จ)
+let flushing=false;
+async function flushPending(){
+  if(flushing || !fb) return;
+  const pend = SALES.filter(b=>b._dirty);
+  if(!pend.length){ updatePendingBadge(); return; }
+  flushing=true;
+  let done=0;
+  for(const b of pend){ if(await pushSale(b)) done++; }
+  flushing=false;
+  updatePendingBadge();
+  if(done) toast('ส่งบิลที่ค้างขึ้นคลาวด์แล้ว '+done+' ใบ');
+}
+function pendingCount(){ return SALES.filter(b=>b._dirty).length; }
+function updatePendingBadge(){
+  const el=$('#pendbar'); if(!el) return;
+  const n=pendingCount();
+  el.classList.toggle('hide', n===0);
+  if(n) el.innerHTML='<span>⏳ มี <b>'+n+'</b> บิลรอส่งขึ้นคลาวด์ '+(fb?'· กำลังส่งให้อัตโนมัติ':'· ยังเชื่อมคลาวด์ไม่ได้')+'</span>'+
+                     '<button id="retrysync">ส่งเดี๋ยวนี้</button>';
 }
 async function pushItems(){
   if(!fb) return;
@@ -588,9 +632,10 @@ async function saveBill(){
     items:cart.map(c=>({id:c.id,name:c.name,price:c.price,qty:c.qty,cat:c.cat})),
     total:cart.reduce((s,c)=>s+c.price*c.qty,0),
     pay:payMode,
-    void:false
+    void:false,
+    _dirty:true                      // ยังไม่ได้ส่งขึ้นคลาวด์
   };
-  SALES.unshift(bill); saveSalesLocal();
+  SALES.unshift(bill); saveSalesLocal(); updatePendingBadge();
   await pushSale(bill);
   cart=[]; renderMenu(); renderCart(); refreshAll();
   toast(isBackdated() ? ('บันทึกลงวันที่ '+thaiDate(workDay)+' แล้ว '+money(bill.total)+' ฿')
@@ -599,8 +644,8 @@ async function saveBill(){
 }
 function voidBill(id){
   const b=SALES.find(s=>s.id===id); if(!b||b.void) return;
-  b.void=true; b.voidAt=new Date().toISOString();
-  saveSalesLocal(); pushVoid(b); refreshAll(); toast('ยกเลิกบิลแล้ว');
+  b.void=true; b.voidAt=new Date().toISOString(); b._dirty=true;
+  saveSalesLocal(); pushSale(b); refreshAll(); toast('ยกเลิกบิลแล้ว');
 }
 
 /* =================== แถบวันที่ที่กำลังบันทึก =================== */
@@ -870,6 +915,16 @@ function syncCartPad(){
 if(window.ResizeObserver){ new ResizeObserver(syncCartPad).observe($('#cartbar')); }
 window.addEventListener('resize', syncCartPad);
 
+/* ---- ส่งบิลค้างอัตโนมัติเป็นระยะ และตอนเน็ตกลับมา ---- */
+setInterval(()=>{ if(fb && pendingCount()) flushPending(); }, 30000);
+window.addEventListener('online', ()=>{ if(fb) flushPending(); });
+document.addEventListener('click', e=>{
+  if(e.target && e.target.id==='retrysync'){
+    if(!fb){ toast('ยังเชื่อมคลาวด์ไม่ได้ กำลังลองใหม่…'); initFirebase().then(ok=>{ if(ok) flushPending(); }); }
+    else flushPending();
+  }
+});
+
 /* =================== session =================== */
 function setSession(){ try{ localStorage.setItem(LS_SESS, String(Date.now())); }catch(e){} }
 function sessionAlive(){
@@ -887,9 +942,11 @@ async function startApp(){
   $('#login').classList.add('hide');
   $('#app').classList.remove('hide');
   renderMenu(); renderCart(); renderDaybar(); refreshAll(); syncCartPad();
+  updatePendingBadge();
   const ok=await initFirebase();
   if(ok){ renderMenu(); refreshAll(); renderSettings(); }
   else toast('เชื่อมคลาวด์ไม่ได้ ใช้ข้อมูลในเครื่องนี้ก่อน');
+  updatePendingBadge();
 }
 
 document.addEventListener('DOMContentLoaded', async ()=>{
