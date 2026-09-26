@@ -217,6 +217,15 @@ table.t td.g{color:var(--gold);font-weight:700}
 .banner{background:var(--bannerbg);border:1px solid var(--bannerline);color:var(--bannerink);border-radius:12px;
   padding:12px 14px;font-size:.95rem;margin-bottom:12px;line-height:1.5}
 
+/* ---------- การ์ดกรอกราคาเอง ---------- */
+.item.ask{border-style:dashed;border-color:var(--gold-dim);background:var(--surface2)}
+.item.ask .pr{color:var(--ink3);font-weight:500}
+.mbox input{width:100%;margin-bottom:10px;padding:13px 14px;border-radius:11px;
+  border:1.5px solid var(--line);background:var(--surface2);color:var(--ink);font-size:1.05rem}
+.mbox input.big{font-size:1.4rem;font-weight:700;text-align:center;color:var(--gold);
+  border-color:var(--gold-dim);letter-spacing:.5px}
+.mbox .mhint{font-size:.88rem;color:var(--ink3);margin:-4px 0 12px}
+
 /* ---------- MODAL / TOAST ---------- */
 #modal{position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:90;display:flex;
   align-items:center;justify-content:center;padding:24px}
@@ -364,8 +373,12 @@ const DEFAULT_ITEMS = [
   {id:'y09', name:'ฐานคอเศรษฐี (แบบ 2)',     price:1499, cat:'ยันต์'},
   {id:'y10', name:'ยันต์ท้าวเวสฯ',           price:1499, cat:'ยันต์'},
   {id:'p01', name:'ลงนะหน้าทอง',             price:999,  cat:'พิธี'},
-  {id:'d01', name:'ค่าครูดูดวง',             price:999,  cat:'ดูดวง'}
+  {id:'d01', name:'ค่าครูดูดวง',             price:999,  cat:'ดูดวง'},
+  // ── รายการที่กรอกราคาเองตอนขาย (ราคาไม่ตายตัว) ──
+  {id:'sp01', name:'กิจกรรมพิเศษ', price:0, cat:'กรอกราคาเอง', ask:true},
+  {id:'am01', name:'วัตถุมงคล',    price:0, cat:'กรอกราคาเอง', ask:true}
 ];
+const ASK_ITEMS = DEFAULT_ITEMS.filter(i=>i.ask);
 
 /* =================== สถานะ =================== */
 let ITEMS=[], SALES=[], cart=[], payMode='cash', saving=false;
@@ -433,9 +446,18 @@ function loadLocal(){
   const FIXNAME={'เทาะพ่อ':'เฑาะฬ่อ'};
   let fixed=false;
   ITEMS.forEach(i=>{ if(FIXNAME[i.name]){ i.name=FIXNAME[i.name]; fixed=true; } });
+  if(ensureAskItems()) fixed=true;
   if(fixed) saveItemsLocal();
   try{ SALES = JSON.parse(localStorage.getItem(LS_SALES)) || []; }
   catch(e){ SALES=[]; }
+}
+// เติมรายการ "กรอกราคาเอง" ถ้ายังไม่มีในเครื่อง/ในคลาวด์ (คืน true ถ้ามีการเติม)
+function ensureAskItems(){
+  let added=false;
+  ASK_ITEMS.forEach(a=>{
+    if(!ITEMS.some(i=>i.id===a.id)){ ITEMS.push({...a}); added=true; }
+  });
+  return added;
 }
 function saveSalesLocal(){ try{ localStorage.setItem(LS_SALES, JSON.stringify(SALES)); }catch(e){} }
 function saveItemsLocal(){ try{ localStorage.setItem(LS_ITEMS, JSON.stringify(ITEMS)); }catch(e){} }
@@ -456,7 +478,11 @@ async function initFirebase(){
     const rows=[]; snap.forEach(d=>rows.push({...d.data(), _fid:d.id}));
     if(rows.length){ SALES=rows; saveSalesLocal(); }
     const cfgSnap=await f.getDocs(f.collection(db,'samnak_config'));
-    cfgSnap.forEach(d=>{ if(d.id==='items' && Array.isArray(d.data().list) && d.data().list.length){ ITEMS=d.data().list; saveItemsLocal(); }});
+    cfgSnap.forEach(d=>{ if(d.id==='items' && Array.isArray(d.data().list) && d.data().list.length){
+      ITEMS=d.data().list;
+      if(ensureAskItems()) pushItems();     // คลาวด์ยังไม่มีรายการใหม่ → เติมแล้วบันทึกกลับ
+      saveItemsLocal();
+    }});
     return true;
   }catch(e){ console.warn('firebase off:',e); fb=null; return false; }
 }
@@ -482,11 +508,11 @@ function renderMenu(){
   cats.forEach(c=>{
     h+='<h3 class="sec">'+esc(c)+'</h3><div class="grid">';
     ITEMS.filter(i=>(i.cat||'อื่น ๆ')===c).forEach(i=>{
-      const q=cart.filter(x=>x.id===i.id).reduce((s,x)=>s+x.qty,0);
-      h+='<button class="item'+(q?' sel':'')+'" data-add="'+esc(i.id)+'">'+
+      const q=cart.filter(x=>(x.base||x.id)===i.id).reduce((s,x)=>s+x.qty,0);
+      h+='<button class="item'+(q?' sel':'')+(i.ask?' ask':'')+'" data-add="'+esc(i.id)+'">'+
          (q?'<span class="cnt">'+q+'</span>':'')+
-         '<span class="nm">'+esc(i.name)+'</span>'+
-         '<span class="pr">'+money(i.price)+' ฿</span></button>';
+         '<span class="nm">'+(i.ask?'✏️ ':'')+esc(i.name)+'</span>'+
+         '<span class="pr">'+(i.ask?'กรอกราคาเอง':money(i.price)+' ฿')+'</span></button>';
     });
     h+='</div>';
   });
@@ -494,9 +520,39 @@ function renderMenu(){
 }
 function addToCart(id){
   const it=ITEMS.find(i=>i.id===id); if(!it) return;
+  if(it.ask){ askPriceBox(it); return; }
   const ex=cart.find(c=>c.id===id);
   if(ex) ex.qty++; else cart.push({id:it.id,name:it.name,price:it.price,cat:it.cat||'',qty:1});
   renderMenu(); renderCart();
+}
+
+/* กล่องกรอกราคาเอง (กิจกรรมพิเศษ / วัตถุมงคล) */
+function askPriceBox(it){
+  const m=document.createElement('div'); m.id='modal';
+  m.innerHTML='<div class="mbox">'+
+    '<p style="font-size:1.05rem"><b>'+esc(it.name)+'</b></p>'+
+    '<input class="apn" placeholder="ชื่องาน เช่น กิจกรรมจุดเทียน">'+
+    '<div class="mhint">ไม่ใส่ก็ได้ ระบบจะบันทึกว่า "'+esc(it.name)+'"</div>'+
+    '<input class="app big" type="number" inputmode="decimal" placeholder="ราคา (บาท)">'+
+    '<div class="mbtns"><button class="no">ยกเลิก</button><button class="yes">เพิ่มลงบิล</button></div></div>';
+  document.body.appendChild(m);
+  const price=m.querySelector('.app'), note=m.querySelector('.apn');
+  const close=()=>m.remove();
+  const add=()=>{
+    const p=Math.round(+price.value||0);
+    if(p<=0){ price.focus(); toast('ใส่ราคาก่อนครับ'); return; }
+    const nm=note.value.trim();
+    cart.push({ id: it.id+'_'+Date.now().toString(36), base: it.id,
+                name: nm ? (it.name+' — '+nm) : it.name,
+                price: p, cat: it.cat||'', qty:1 });
+    close(); renderMenu(); renderCart();
+    toast('เพิ่ม '+money(p)+' ฿ ลงบิลแล้ว');
+  };
+  m.querySelector('.no').onclick=close;
+  m.querySelector('.yes').onclick=add;
+  price.addEventListener('keydown',e=>{ if(e.key==='Enter') add(); });
+  note.addEventListener('keydown',e=>{ if(e.key==='Enter') price.focus(); });
+  setTimeout(()=>note.focus(),60);
 }
 function renderCart(){
   const list=$('#cartlist');
@@ -753,7 +809,9 @@ function renderSettings(){
   $('#setlist').innerHTML=ITEMS.map((i,ix)=>
     '<div class="srow" data-ix="'+ix+'">'+
     '<input class="nm" value="'+esc(i.name)+'">'+
-    '<input class="pr" type="number" inputmode="numeric" value="'+i.price+'">'+
+    (i.ask
+      ? '<span class="pr" style="width:88px;text-align:right;font-size:.85rem;color:var(--ink3)">กรอกตอนขาย</span>'
+      : '<input class="pr" type="number" inputmode="numeric" value="'+i.price+'">')+
     '<button class="del" data-del="'+ix+'">✕</button></div>').join('');
   $('#storebanner').innerHTML = fb
     ? '<div class="banner">✅ เชื่อมฐานข้อมูลออนไลน์อยู่ ข้อมูลเก็บบนคลาวด์</div>'
@@ -768,8 +826,10 @@ function saveItems(){
     const ix=+r.dataset.ix;
     const old=ITEMS[ix]||{};
     const nm=r.querySelector('.nm').value.trim();
-    const pr=Math.max(0,Math.round(+r.querySelector('.pr').value||0));
-    if(nm) next.push({id:old.id||('x'+Date.now()+Math.random().toString(36).slice(2,5)), name:nm, price:pr, cat:old.cat||'อื่น ๆ'});
+    const prEl=r.querySelector('input.pr');
+    const pr=prEl ? Math.max(0,Math.round(+prEl.value||0)) : 0;
+    if(nm) next.push({id:old.id||('x'+Date.now()+Math.random().toString(36).slice(2,5)),
+                      name:nm, price:pr, cat:old.cat||'อื่น ๆ', ...(old.ask?{ask:true}:{})});
   });
   if(!next.length){ toast('ต้องมีอย่างน้อย 1 รายการ'); return; }
   ITEMS=next; saveItemsLocal(); pushItems(); renderMenu(); renderSettings(); toast('บันทึกรายการแล้ว');
