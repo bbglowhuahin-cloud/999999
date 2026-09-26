@@ -354,6 +354,41 @@ table.t td.g{color:var(--gold);font-weight:700}
   </div>
 </div>
 
+
+<script type="module">
+// เชื่อมคลาวด์ตั้งแต่เปิดหน้า (ไม่ต้องรอล็อกอิน) และเกาะฟังแบบเรียลไทม์ — แบบเดียวกับ POS ร้าน
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getFirestore, collection, doc, onSnapshot, setDoc, getDocs }
+  from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+const FB_CONFIG = {
+  apiKey: "AIzaSyB8HM1grB7OsiBvdLo5xRH5SqLnQoLR25U",
+  authDomain: "bbglowhuahin-3bb7d.firebaseapp.com",
+  projectId: "bbglowhuahin-3bb7d",
+  storageBucket: "bbglowhuahin-3bb7d.firebasestorage.app",
+  messagingSenderId: "714462283652",
+  appId: "1:714462283652:web:088c6ddde11f46fc08ffd1"
+};
+try{
+  const cfgLocal = JSON.parse(localStorage.getItem('nnp_fbcfg_v1')||'null');
+  const cfg = (cfgLocal && cfgLocal.projectId) ? cfgLocal : FB_CONFIG;
+  const app = initializeApp(cfg);
+  const db  = getFirestore(app);
+  window.NNP = {
+    ready: true,
+    saveSale: (id, data) => setDoc(doc(db,'samnak_sales',id), data, {merge:true}),
+    saveItems: list => setDoc(doc(db,'samnak_config','items'), {list}),
+    listenSales: cb => onSnapshot(collection(db,'samnak_sales'),
+      snap => cb(snap.docs.map(d=>({...d.data(), _fid:d.id}))),
+      err => console.warn('listen sales fail', err)),
+    listenItems: cb => onSnapshot(doc(db,'samnak_config','items'),
+      d => { if(d.exists() && Array.isArray(d.data().list)) cb(d.data().list); },
+      err => console.warn('listen items fail', err))
+  };
+}catch(e){ console.warn('firebase init fail', e); window.NNP={ready:false}; }
+window.dispatchEvent(new Event('nnpReady'));
+</script>
+
 <script>
 /* =================== ค่าคงที่ =================== */
 const SALT = 'nnp-samnak-2569';
@@ -475,44 +510,41 @@ function saveItemsLocal(){ try{ localStorage.setItem(LS_ITEMS, JSON.stringify(IT
 
 /* ---- Firebase (ใส่ config เองได้ในหน้าตั้งค่า) ---- */
 async function initFirebase(){
-  let cfg=null;
-  try{ cfg=JSON.parse(localStorage.getItem(LS_FB)||'null'); }catch(e){}
-  if(!cfg || !cfg.projectId) cfg=DEFAULT_FB_CONFIG;
-  if(!cfg || !cfg.projectId) return false;
+  if(!window.NNP || !window.NNP.ready) return false;
+  fb = window.NNP;
   try{
-    const a=await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js');
-    const f=await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
-    const app=a.initializeApp(cfg);
-    const db=f.getFirestore(app);
-    fb={db, f};
-    const snap=await f.getDocs(f.query(f.collection(db,'samnak_sales'), f.orderBy('ts','desc'), f.limit(3000)));
-    const cloud=[]; snap.forEach(d=>cloud.push({...d.data(), _fid:d.id}));
-    // ⚠️ ห้ามเอาข้อมูลคลาวด์ทับของในเครื่องดื้อ ๆ — บิลที่เพิ่งลงระหว่างรอเชื่อมต่อจะหาย
-    const byId = new Map();
-    cloud.forEach(b=>{ if(b && b.id) byId.set(b.id, b); });
-    SALES.forEach(local=>{
-      if(!local || !local.id) return;
-      if(local._dirty || !byId.has(local.id)) byId.set(local.id, local);   // ของในเครื่องที่ยังไม่ได้ส่ง = ตัวจริง
+    // เกาะฟังบิลแบบเรียลไทม์ — เครื่องอื่นลงบิล เครื่องนี้เห็นทันที ไม่ต้องรีเฟรช
+    fb.listenSales(cloud=>{
+      const byId = new Map();
+      cloud.forEach(b=>{ if(b && b.id) byId.set(b.id, b); });
+      // ของในเครื่องที่ยังส่งไม่สำเร็จ = ตัวจริง ห้ามให้คลาวด์ทับ
+      SALES.forEach(local=>{
+        if(!local || !local.id) return;
+        if(local._dirty || !byId.has(local.id)) byId.set(local.id, local);
+      });
+      SALES = [...byId.values()].sort((a,b)=>String(b.ts).localeCompare(String(a.ts)));
+      saveSalesLocal();
+      flushPending();
+      refreshAll();
+      if(!$('#tab-settings').classList.contains('hide')) renderSettings();
     });
-    SALES = [...byId.values()].sort((a,b)=>String(b.ts).localeCompare(String(a.ts)));
-    saveSalesLocal();
-    flushPending();                       // ส่งบิลที่ค้างขึ้นคลาวด์ทันที
-    const cfgSnap=await f.getDocs(f.collection(db,'samnak_config'));
-    cfgSnap.forEach(d=>{ if(d.id==='items' && Array.isArray(d.data().list) && d.data().list.length){
-      ITEMS=d.data().list;
-      if(ensureAskItems()) pushItems();     // คลาวด์ยังไม่มีรายการใหม่ → เติมแล้วบันทึกกลับ
-      saveItemsLocal();
-    }});
+    fb.listenItems(list=>{
+      if(!list.length) return;
+      ITEMS = list;
+      if(ensureAskItems()) pushItems();
+      saveItemsLocal(); renderMenu();
+      if(!$('#tab-settings').classList.contains('hide')) renderSettings();
+    });
     return true;
-  }catch(e){ console.warn('firebase off:',e); fb=null; return false; }
+  }catch(e){ console.warn('listen fail',e); fb=null; return false; }
 }
-// ส่งบิลขึ้นคลาวด์ด้วย id คงที่ → ส่งซ้ำกี่ครั้งก็ไม่เกิดบิลซ้ำ
+
 async function pushSale(bill){
   if(!fb){ updatePendingBadge(); return false; }
   const docId = bill._fid || bill.id;
   try{
     const clean = {...bill}; delete clean._dirty;
-    await fb.f.setDoc(fb.f.doc(fb.db,'samnak_sales',docId), clean, {merge:true});
+    await fb.saveSale(docId, clean);
     delete bill._dirty; bill._fid = docId;
     saveSalesLocal(); updatePendingBadge();
     return true;
@@ -542,7 +574,7 @@ function updatePendingBadge(){
 }
 async function pushItems(){
   if(!fb) return;
-  try{ await fb.f.setDoc(fb.f.doc(fb.db,'samnak_config','items'), {list:ITEMS}); }catch(e){}
+  try{ await fb.saveItems(ITEMS); }catch(e){}
 }
 
 /* =================== เมนูขาย =================== */
@@ -943,10 +975,15 @@ async function startApp(){
   $('#app').classList.remove('hide');
   renderMenu(); renderCart(); renderDaybar(); refreshAll(); syncCartPad();
   updatePendingBadge();
-  const ok=await initFirebase();
-  if(ok){ renderMenu(); refreshAll(); renderSettings(); }
-  else toast('เชื่อมคลาวด์ไม่ได้ ใช้ข้อมูลในเครื่องนี้ก่อน');
-  updatePendingBadge();
+  const start = ()=>{
+    const ok = initFirebase();
+    Promise.resolve(ok).then(good=>{
+      if(good){ renderMenu(); refreshAll(); }
+      else toast('เชื่อมคลาวด์ไม่ได้ ใช้ข้อมูลในเครื่องนี้ก่อน');
+      updatePendingBadge();
+    });
+  };
+  if(window.NNP) start(); else window.addEventListener('nnpReady', start, {once:true});
 }
 
 document.addEventListener('DOMContentLoaded', async ()=>{
