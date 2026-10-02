@@ -507,6 +507,7 @@ async function flushQueue(){
     while(PENDING.length){
       const bill=PENDING[0];
       const data={...bill}; delete data._pending; delete data._fid;
+      Object.keys(data).forEach(k=>{ if(data[k]===undefined) delete data[k]; });   // Firestore ไม่รับค่าว่าง
       try{
         const r=await fb.f.addDoc(fb.f.collection(fb.db,'samnak_sales_TEST'), data);
         const local=SALES.find(s=>s.id===bill.id);
@@ -586,7 +587,7 @@ async function saveBill(){
     id:'B'+now.getTime()+Math.random().toString(36).slice(2,6),
     ts:stamp.toISOString(),
     day:activeDay(),
-    backdated: isBackdated() || undefined,
+    ...(isBackdated() ? {backdated:true} : {}),
     items:cart.map(c=>({id:c.id,name:c.name,price:c.price,qty:c.qty,cat:c.cat})),
     total:cart.reduce((s,c)=>s+c.price*c.qty,0),
     pay:payMode,
