@@ -79,6 +79,11 @@ header h2{font-size:1.05rem;margin:0;flex:1;color:var(--headerink);font-weight:7
 .hstat{font-size:.82rem;color:var(--headerink);opacity:.85;text-align:right;line-height:1.25}
 .hstat b{display:block;color:var(--headerink);opacity:1;font-size:1.05rem;font-weight:700}
 #logout{background:none;color:var(--headerink);opacity:.8;font-size:1.3rem;padding:4px 8px}
+.clouddot{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:8px;flex-shrink:0;background:#9aa0a6}
+.clouddot.on{background:#43a047;box-shadow:0 0 0 3px rgba(67,160,71,.18)}
+.clouddot.sync{background:#f9a825;animation:dotpulse 1s infinite}
+.clouddot.off{background:#c62828;box-shadow:0 0 0 3px rgba(198,40,40,.15)}
+@keyframes dotpulse{0%,100%{opacity:1}50%{opacity:.35}}
 
 nav{display:flex;background:var(--surface);border-bottom:1px solid var(--line);
   position:sticky;top:51px;z-index:39}
@@ -130,14 +135,6 @@ h3.sec:first-child{margin-top:4px}
   background:var(--accent);color:var(--accent-ink)}
 #save:disabled{opacity:.5}
 .emptycart{text-align:center;color:var(--ink3);font-size:1rem;padding:6px 0 4px}
-
-/* ---------- แถบบิลค้างส่ง ---------- */
-#pendbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;padding:11px 13px;
-  border-radius:12px;background:#ffe9d6;border:1.5px solid #cf6a2b;color:#6b3208;font-size:.95rem}
-:root[data-theme="dark"] #pendbar{background:#3a1f0c;border-color:#8a4a1e;color:#f5cfa8}
-#pendbar span{flex:1;min-width:0}
-#pendbar button{flex:0 0 auto;padding:9px 14px;border-radius:9px;background:#cf6a2b;color:#fff;
-  font-size:.9rem;font-weight:700;white-space:nowrap}
 
 /* ---------- แถบวันที่ทำงาน ---------- */
 #daybar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;padding:11px 13px;
@@ -225,15 +222,6 @@ table.t td.g{color:var(--gold);font-weight:700}
 .banner{background:var(--bannerbg);border:1px solid var(--bannerline);color:var(--bannerink);border-radius:12px;
   padding:12px 14px;font-size:.95rem;margin-bottom:12px;line-height:1.5}
 
-/* ---------- การ์ดกรอกราคาเอง ---------- */
-.item.ask{border-style:dashed;border-color:var(--gold-dim);background:var(--surface2)}
-.item.ask .pr{color:var(--ink3);font-weight:500}
-.mbox input{width:100%;margin-bottom:10px;padding:13px 14px;border-radius:11px;
-  border:1.5px solid var(--line);background:var(--surface2);color:var(--ink);font-size:1.05rem}
-.mbox input.big{font-size:1.4rem;font-weight:700;text-align:center;color:var(--gold);
-  border-color:var(--gold-dim);letter-spacing:.5px}
-.mbox .mhint{font-size:.88rem;color:var(--ink3);margin:-4px 0 12px}
-
 /* ---------- MODAL / TOAST ---------- */
 #modal{position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:90;display:flex;
   align-items:center;justify-content:center;padding:24px}
@@ -269,6 +257,7 @@ table.t td.g{color:var(--gold);font-weight:700}
   <header>
     <div class="mark">๛</div>
     <h2>บ้านนนทภักดิ์</h2>
+    <span id="clouddot" class="clouddot off" title="กำลังเชื่อมคลาวด์..."></span>
     <div class="hstat"><b id="hToday">0 ฿</b>วันนี้ · <span id="hBills">0</span> บิล</div>
     <button id="logout" title="ออกจากระบบ">⏻</button>
   </header>
@@ -281,9 +270,6 @@ table.t td.g{color:var(--gold);font-weight:700}
   </nav>
 
   <main>
-    <!-- ---- แถบบิลที่ยังไม่ได้ส่งขึ้นคลาวด์ ---- -->
-    <div id="pendbar" class="hide"></div>
-
     <!-- ---- แถบวันที่ที่กำลังบันทึก ---- -->
     <div id="daybar"></div>
     <input type="date" id="daypick" class="hide">
@@ -354,41 +340,6 @@ table.t td.g{color:var(--gold);font-weight:700}
   </div>
 </div>
 
-
-<script type="module">
-// เชื่อมคลาวด์ตั้งแต่เปิดหน้า (ไม่ต้องรอล็อกอิน) และเกาะฟังแบบเรียลไทม์ — แบบเดียวกับ POS ร้าน
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getFirestore, collection, doc, onSnapshot, setDoc, getDocs }
-  from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
-
-const FB_CONFIG = {
-  apiKey: "AIzaSyB8HM1grB7OsiBvdLo5xRH5SqLnQoLR25U",
-  authDomain: "bbglowhuahin-3bb7d.firebaseapp.com",
-  projectId: "bbglowhuahin-3bb7d",
-  storageBucket: "bbglowhuahin-3bb7d.firebasestorage.app",
-  messagingSenderId: "714462283652",
-  appId: "1:714462283652:web:088c6ddde11f46fc08ffd1"
-};
-try{
-  const cfgLocal = JSON.parse(localStorage.getItem('nnp_fbcfg_v1')||'null');
-  const cfg = (cfgLocal && cfgLocal.projectId) ? cfgLocal : FB_CONFIG;
-  const app = initializeApp(cfg);
-  const db  = getFirestore(app);
-  window.NNP = {
-    ready: true,
-    saveSale: (id, data) => setDoc(doc(db,'samnak_sales',id), data, {merge:true}),
-    saveItems: list => setDoc(doc(db,'samnak_config','items'), {list}),
-    listenSales: cb => onSnapshot(collection(db,'samnak_sales'),
-      snap => cb(snap.docs.map(d=>({...d.data(), _fid:d.id}))),
-      err => console.warn('listen sales fail', err)),
-    listenItems: cb => onSnapshot(doc(db,'samnak_config','items'),
-      d => { if(d.exists() && Array.isArray(d.data().list)) cb(d.data().list); },
-      err => console.warn('listen items fail', err))
-  };
-}catch(e){ console.warn('firebase init fail', e); window.NNP={ready:false}; }
-window.dispatchEvent(new Event('nnpReady'));
-</script>
-
 <script>
 /* =================== ค่าคงที่ =================== */
 const SALT = 'nnp-samnak-2569';
@@ -419,12 +370,8 @@ const DEFAULT_ITEMS = [
   {id:'y09', name:'ฐานคอเศรษฐี (แบบ 2)',     price:1499, cat:'ยันต์'},
   {id:'y10', name:'ยันต์ท้าวเวสฯ',           price:1499, cat:'ยันต์'},
   {id:'p01', name:'ลงนะหน้าทอง',             price:999,  cat:'พิธี'},
-  {id:'d01', name:'ค่าครูดูดวง',             price:999,  cat:'ดูดวง'},
-  // ── รายการที่กรอกราคาเองตอนขาย (ราคาไม่ตายตัว) ──
-  {id:'sp01', name:'กิจกรรมพิเศษ', price:0, cat:'กรอกราคาเอง', ask:true},
-  {id:'am01', name:'วัตถุมงคล',    price:0, cat:'กรอกราคาเอง', ask:true}
+  {id:'d01', name:'ค่าครูดูดวง',             price:999,  cat:'ดูดวง'}
 ];
-const ASK_ITEMS = DEFAULT_ITEMS.filter(i=>i.ask);
 
 /* =================== สถานะ =================== */
 let ITEMS=[], SALES=[], cart=[], payMode='cash', saving=false;
@@ -492,89 +439,99 @@ function loadLocal(){
   const FIXNAME={'เทาะพ่อ':'เฑาะฬ่อ'};
   let fixed=false;
   ITEMS.forEach(i=>{ if(FIXNAME[i.name]){ i.name=FIXNAME[i.name]; fixed=true; } });
-  if(ensureAskItems()) fixed=true;
   if(fixed) saveItemsLocal();
   try{ SALES = JSON.parse(localStorage.getItem(LS_SALES)) || []; }
   catch(e){ SALES=[]; }
 }
-// เติมรายการ "กรอกราคาเอง" ถ้ายังไม่มีในเครื่อง/ในคลาวด์ (คืน true ถ้ามีการเติม)
-function ensureAskItems(){
-  let added=false;
-  ASK_ITEMS.forEach(a=>{
-    if(!ITEMS.some(i=>i.id===a.id)){ ITEMS.push({...a}); added=true; }
-  });
-  return added;
-}
 function saveSalesLocal(){ try{ localStorage.setItem(LS_SALES, JSON.stringify(SALES)); }catch(e){} }
 function saveItemsLocal(){ try{ localStorage.setItem(LS_ITEMS, JSON.stringify(ITEMS)); }catch(e){} }
 
-/* ---- Firebase (ใส่ config เองได้ในหน้าตั้งค่า) ---- */
+/* ---- Firebase: เชื่อมสด ทุกเครื่องเห็นพร้อมกัน · บันทึกแล้วไม่ต้องรออัป ---- */
+const LS_QUEUE='nnp_queue_v1';
+let PENDING=[];                       // บิลที่ยังอัปขึ้นคลาวด์ไม่สำเร็จ
+try{ PENDING=JSON.parse(localStorage.getItem(LS_QUEUE)||'[]')||[]; }catch(e){ PENDING=[]; }
+function saveQueue(){ try{ localStorage.setItem(LS_QUEUE, JSON.stringify(PENDING)); }catch(e){} }
+function setCloudDot(state){
+  const el=document.getElementById('clouddot'); if(!el) return;
+  el.className='clouddot '+state;
+  el.title = state==='on'  ? 'เชื่อมคลาวด์แล้ว ทุกเครื่องเห็นตรงกัน'
+           : state==='sync'? 'กำลังอัปบิลขึ้นคลาวด์ ('+PENDING.length+' บิล)'
+           :                 'ยังไม่ได้เชื่อมคลาวด์ บิลเก็บไว้ในเครื่องก่อน เดี๋ยวอัปให้อัตโนมัติ';
+}
+function mergeCloud(rows){
+  // บิลจากคลาวด์คือตัวจริง แล้วต่อท้ายด้วยบิลที่เพิ่งบันทึกและยังอัปไม่ขึ้น
+  const ids=new Set(rows.map(r=>r&&r.id).filter(Boolean));
+  const waiting=SALES.filter(s=>s&&s.id&&!ids.has(s.id)&&(s._pending||PENDING.some(p=>p.id===s.id)));
+  SALES=[...rows,...waiting].sort((a,b)=>String(b.ts||'').localeCompare(String(a.ts||'')));
+  saveSalesLocal();
+}
 async function initFirebase(){
-  if(!window.NNP || !window.NNP.ready) return false;
-  fb = window.NNP;
+  let cfg=null;
+  try{ cfg=JSON.parse(localStorage.getItem(LS_FB)||'null'); }catch(e){}
+  if(!cfg || !cfg.projectId) cfg=DEFAULT_FB_CONFIG;
+  if(!cfg || !cfg.projectId) return false;
   try{
-    // เกาะฟังบิลแบบเรียลไทม์ — เครื่องอื่นลงบิล เครื่องนี้เห็นทันที ไม่ต้องรีเฟรช
-    fb.listenSales(cloud=>{
-      const byId = new Map();
-      cloud.forEach(b=>{ if(b && b.id) byId.set(b.id, b); });
-      // ของในเครื่องที่ยังส่งไม่สำเร็จ = ตัวจริง ห้ามให้คลาวด์ทับ
-      SALES.forEach(local=>{
-        if(!local || !local.id) return;
-        if(local._dirty || !byId.has(local.id)) byId.set(local.id, local);
-      });
-      SALES = [...byId.values()].sort((a,b)=>String(b.ts).localeCompare(String(a.ts)));
-      saveSalesLocal();
-      flushPending();
-      refreshAll();
-      if(!$('#tab-settings').classList.contains('hide')) renderSettings();
-    });
-    fb.listenItems(list=>{
-      if(!list.length) return;
-      ITEMS = list;
-      if(ensureAskItems()) pushItems();
-      saveItemsLocal(); renderMenu();
-      if(!$('#tab-settings').classList.contains('hide')) renderSettings();
-    });
+    const a=await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js');
+    const f=await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
+    const app=a.initializeApp(cfg);
+    const db=f.getFirestore(app);
+    fb={db, f};
+    // ฟังสด: เครื่องอื่นเปิดบิล เครื่องนี้เห็นทันทีโดยไม่ต้องรีเฟรช
+    f.onSnapshot(f.query(f.collection(db,'samnak_sales'), f.orderBy('ts','desc'), f.limit(3000)),
+      snap=>{
+        const rows=[]; snap.forEach(d=>rows.push({...d.data(), _fid:d.id}));
+        mergeCloud(rows);
+        setCloudDot(PENDING.length?'sync':'on');
+        try{ if(!$('#app').classList.contains('hide')) refreshAll(); }catch(e){}
+      },
+      err=>{ console.warn('sales listen fail',err); setCloudDot('off'); });
+    // รายการและราคา ก็ซิงก์ทุกเครื่องเหมือนกัน
+    f.onSnapshot(f.doc(db,'samnak_config','items'),
+      d=>{ const v=d.data(); if(v && Array.isArray(v.list) && v.list.length){ ITEMS=v.list; saveItemsLocal(); try{ renderMenu(); }catch(e){} } },
+      err=>console.warn('items listen fail',err));
+    setCloudDot(PENDING.length?'sync':'on');
+    flushQueue();
     return true;
-  }catch(e){ console.warn('listen fail',e); fb=null; return false; }
+  }catch(e){ console.warn('firebase off:',e); fb=null; setCloudDot('off'); return false; }
 }
-
-async function pushSale(bill){
-  if(!fb){ updatePendingBadge(); return false; }
-  const docId = bill._fid || bill.id;
+// บันทึกบิล = เก็บลงเครื่องทันที แล้วค่อยอัปขึ้นคลาวด์เบื้องหลัง
+function pushSale(bill){
+  if(!PENDING.some(p=>p.id===bill.id)){ PENDING.push(bill); saveQueue(); }
+  setCloudDot(fb?'sync':'off');
+  flushQueue();
+}
+async function flushQueue(){
+  if(!fb || !PENDING.length || flushQueue._busy) return;
+  flushQueue._busy=true;
   try{
-    const clean = {...bill}; delete clean._dirty;
-    await fb.saveSale(docId, clean);
-    delete bill._dirty; bill._fid = docId;
-    saveSalesLocal(); updatePendingBadge();
-    return true;
-  }catch(e){ console.warn('push fail',e); updatePendingBadge(); return false; }
+    while(PENDING.length){
+      const bill=PENDING[0];
+      const data={...bill}; delete data._pending; delete data._fid;
+      Object.keys(data).forEach(k=>{ if(data[k]===undefined) delete data[k]; });   // Firestore ไม่รับค่าว่าง
+      try{
+        const r=await fb.f.addDoc(fb.f.collection(fb.db,'samnak_sales'), data);
+        const local=SALES.find(s=>s.id===bill.id);
+        if(local){ local._fid=r.id; delete local._pending; }
+        PENDING.shift(); saveQueue(); saveSalesLocal();
+      }catch(e){ console.warn('push fail',e); break; }
+    }
+  } finally {
+    flushQueue._busy=false;
+    setCloudDot(PENDING.length?'off':'on');
+    if(PENDING.length) setTimeout(flushQueue, 15000);
+  }
 }
-
-// ส่งบิลที่ยังค้างอยู่ทั้งหมด (ลงตอนเน็ตไม่มา / ตอนแอปยังเชื่อมคลาวด์ไม่เสร็จ)
-let flushing=false;
-async function flushPending(){
-  if(flushing || !fb) return;
-  const pend = SALES.filter(b=>b._dirty);
-  if(!pend.length){ updatePendingBadge(); return; }
-  flushing=true;
-  let done=0;
-  for(const b of pend){ if(await pushSale(b)) done++; }
-  flushing=false;
-  updatePendingBadge();
-  if(done) toast('ส่งบิลที่ค้างขึ้นคลาวด์แล้ว '+done+' ใบ');
+async function pushVoid(bill){
+  if(!fb) return;
+  if(!bill._fid){ setTimeout(()=>pushVoid(bill), 4000); return; }   // รอให้บิลอัปขึ้นก่อน
+  try{ await fb.f.updateDoc(fb.f.doc(fb.db,'samnak_sales',bill._fid), {void:true, voidAt:bill.voidAt}); }
+  catch(e){ console.warn('void sync fail',e); setTimeout(()=>pushVoid(bill), 15000); }
 }
-function pendingCount(){ return SALES.filter(b=>b._dirty).length; }
-function updatePendingBadge(){
-  const el=$('#pendbar'); if(!el) return;
-  const n=pendingCount();
-  el.classList.toggle('hide', n===0);
-  if(n) el.innerHTML='<span>⏳ มี <b>'+n+'</b> บิลรอส่งขึ้นคลาวด์ '+(fb?'· กำลังส่งให้อัตโนมัติ':'· ยังเชื่อมคลาวด์ไม่ได้')+'</span>'+
-                     '<button id="retrysync">ส่งเดี๋ยวนี้</button>';
-}
+window.addEventListener('online', ()=>flushQueue());
+setInterval(()=>{ if(PENDING.length) flushQueue(); }, 30000);
 async function pushItems(){
   if(!fb) return;
-  try{ await fb.saveItems(ITEMS); }catch(e){}
+  try{ await fb.f.setDoc(fb.f.doc(fb.db,'samnak_config','items'), {list:ITEMS}); }catch(e){}
 }
 
 /* =================== เมนูขาย =================== */
@@ -584,11 +541,11 @@ function renderMenu(){
   cats.forEach(c=>{
     h+='<h3 class="sec">'+esc(c)+'</h3><div class="grid">';
     ITEMS.filter(i=>(i.cat||'อื่น ๆ')===c).forEach(i=>{
-      const q=cart.filter(x=>(x.base||x.id)===i.id).reduce((s,x)=>s+x.qty,0);
-      h+='<button class="item'+(q?' sel':'')+(i.ask?' ask':'')+'" data-add="'+esc(i.id)+'">'+
+      const q=cart.filter(x=>x.id===i.id).reduce((s,x)=>s+x.qty,0);
+      h+='<button class="item'+(q?' sel':'')+'" data-add="'+esc(i.id)+'">'+
          (q?'<span class="cnt">'+q+'</span>':'')+
-         '<span class="nm">'+(i.ask?'✏️ ':'')+esc(i.name)+'</span>'+
-         '<span class="pr">'+(i.ask?'กรอกราคาเอง':money(i.price)+' ฿')+'</span></button>';
+         '<span class="nm">'+esc(i.name)+'</span>'+
+         '<span class="pr">'+money(i.price)+' ฿</span></button>';
     });
     h+='</div>';
   });
@@ -596,39 +553,9 @@ function renderMenu(){
 }
 function addToCart(id){
   const it=ITEMS.find(i=>i.id===id); if(!it) return;
-  if(it.ask){ askPriceBox(it); return; }
   const ex=cart.find(c=>c.id===id);
   if(ex) ex.qty++; else cart.push({id:it.id,name:it.name,price:it.price,cat:it.cat||'',qty:1});
   renderMenu(); renderCart();
-}
-
-/* กล่องกรอกราคาเอง (กิจกรรมพิเศษ / วัตถุมงคล) */
-function askPriceBox(it){
-  const m=document.createElement('div'); m.id='modal';
-  m.innerHTML='<div class="mbox">'+
-    '<p style="font-size:1.05rem"><b>'+esc(it.name)+'</b></p>'+
-    '<input class="apn" placeholder="ชื่องาน เช่น กิจกรรมจุดเทียน">'+
-    '<div class="mhint">ไม่ใส่ก็ได้ ระบบจะบันทึกว่า "'+esc(it.name)+'"</div>'+
-    '<input class="app big" type="number" inputmode="decimal" placeholder="ราคา (บาท)">'+
-    '<div class="mbtns"><button class="no">ยกเลิก</button><button class="yes">เพิ่มลงบิล</button></div></div>';
-  document.body.appendChild(m);
-  const price=m.querySelector('.app'), note=m.querySelector('.apn');
-  const close=()=>m.remove();
-  const add=()=>{
-    const p=Math.round(+price.value||0);
-    if(p<=0){ price.focus(); toast('ใส่ราคาก่อนครับ'); return; }
-    const nm=note.value.trim();
-    cart.push({ id: it.id+'_'+Date.now().toString(36), base: it.id,
-                name: nm ? (it.name+' — '+nm) : it.name,
-                price: p, cat: it.cat||'', qty:1 });
-    close(); renderMenu(); renderCart();
-    toast('เพิ่ม '+money(p)+' ฿ ลงบิลแล้ว');
-  };
-  m.querySelector('.no').onclick=close;
-  m.querySelector('.yes').onclick=add;
-  price.addEventListener('keydown',e=>{ if(e.key==='Enter') add(); });
-  note.addEventListener('keydown',e=>{ if(e.key==='Enter') price.focus(); });
-  setTimeout(()=>note.focus(),60);
 }
 function renderCart(){
   const list=$('#cartlist');
@@ -660,15 +587,15 @@ async function saveBill(){
     id:'B'+now.getTime()+Math.random().toString(36).slice(2,6),
     ts:stamp.toISOString(),
     day:activeDay(),
-    backdated: isBackdated() || undefined,
+    ...(isBackdated() ? {backdated:true} : {}),
     items:cart.map(c=>({id:c.id,name:c.name,price:c.price,qty:c.qty,cat:c.cat})),
     total:cart.reduce((s,c)=>s+c.price*c.qty,0),
     pay:payMode,
-    void:false,
-    _dirty:true                      // ยังไม่ได้ส่งขึ้นคลาวด์
+    void:false
   };
-  SALES.unshift(bill); saveSalesLocal(); updatePendingBadge();
-  await pushSale(bill);
+  bill._pending=true;
+  SALES.unshift(bill); saveSalesLocal();
+  pushSale(bill);                       // อัปขึ้นคลาวด์เบื้องหลัง ไม่ต้องรอ
   cart=[]; renderMenu(); renderCart(); refreshAll();
   toast(isBackdated() ? ('บันทึกลงวันที่ '+thaiDate(workDay)+' แล้ว '+money(bill.total)+' ฿')
                       : ('บันทึกแล้ว '+money(bill.total)+' ฿'));
@@ -676,8 +603,8 @@ async function saveBill(){
 }
 function voidBill(id){
   const b=SALES.find(s=>s.id===id); if(!b||b.void) return;
-  b.void=true; b.voidAt=new Date().toISOString(); b._dirty=true;
-  saveSalesLocal(); pushSale(b); refreshAll(); toast('ยกเลิกบิลแล้ว');
+  b.void=true; b.voidAt=new Date().toISOString();
+  saveSalesLocal(); pushVoid(b); refreshAll(); toast('ยกเลิกบิลแล้ว');
 }
 
 /* =================== แถบวันที่ที่กำลังบันทึก =================== */
@@ -886,9 +813,7 @@ function renderSettings(){
   $('#setlist').innerHTML=ITEMS.map((i,ix)=>
     '<div class="srow" data-ix="'+ix+'">'+
     '<input class="nm" value="'+esc(i.name)+'">'+
-    (i.ask
-      ? '<span class="pr" style="width:88px;text-align:right;font-size:.85rem;color:var(--ink3)">กรอกตอนขาย</span>'
-      : '<input class="pr" type="number" inputmode="numeric" value="'+i.price+'">')+
+    '<input class="pr" type="number" inputmode="numeric" value="'+i.price+'">'+
     '<button class="del" data-del="'+ix+'">✕</button></div>').join('');
   $('#storebanner').innerHTML = fb
     ? '<div class="banner">✅ เชื่อมฐานข้อมูลออนไลน์อยู่ ข้อมูลเก็บบนคลาวด์</div>'
@@ -903,10 +828,8 @@ function saveItems(){
     const ix=+r.dataset.ix;
     const old=ITEMS[ix]||{};
     const nm=r.querySelector('.nm').value.trim();
-    const prEl=r.querySelector('input.pr');
-    const pr=prEl ? Math.max(0,Math.round(+prEl.value||0)) : 0;
-    if(nm) next.push({id:old.id||('x'+Date.now()+Math.random().toString(36).slice(2,5)),
-                      name:nm, price:pr, cat:old.cat||'อื่น ๆ', ...(old.ask?{ask:true}:{})});
+    const pr=Math.max(0,Math.round(+r.querySelector('.pr').value||0));
+    if(nm) next.push({id:old.id||('x'+Date.now()+Math.random().toString(36).slice(2,5)), name:nm, price:pr, cat:old.cat||'อื่น ๆ'});
   });
   if(!next.length){ toast('ต้องมีอย่างน้อย 1 รายการ'); return; }
   ITEMS=next; saveItemsLocal(); pushItems(); renderMenu(); renderSettings(); toast('บันทึกรายการแล้ว');
@@ -947,16 +870,6 @@ function syncCartPad(){
 if(window.ResizeObserver){ new ResizeObserver(syncCartPad).observe($('#cartbar')); }
 window.addEventListener('resize', syncCartPad);
 
-/* ---- ส่งบิลค้างอัตโนมัติเป็นระยะ และตอนเน็ตกลับมา ---- */
-setInterval(()=>{ if(fb && pendingCount()) flushPending(); }, 30000);
-window.addEventListener('online', ()=>{ if(fb) flushPending(); });
-document.addEventListener('click', e=>{
-  if(e.target && e.target.id==='retrysync'){
-    if(!fb){ toast('ยังเชื่อมคลาวด์ไม่ได้ กำลังลองใหม่…'); initFirebase().then(ok=>{ if(ok) flushPending(); }); }
-    else flushPending();
-  }
-});
-
 /* =================== session =================== */
 function setSession(){ try{ localStorage.setItem(LS_SESS, String(Date.now())); }catch(e){} }
 function sessionAlive(){
@@ -974,16 +887,9 @@ async function startApp(){
   $('#login').classList.add('hide');
   $('#app').classList.remove('hide');
   renderMenu(); renderCart(); renderDaybar(); refreshAll(); syncCartPad();
-  updatePendingBadge();
-  const start = ()=>{
-    const ok = initFirebase();
-    Promise.resolve(ok).then(good=>{
-      if(good){ renderMenu(); refreshAll(); }
-      else toast('เชื่อมคลาวด์ไม่ได้ ใช้ข้อมูลในเครื่องนี้ก่อน');
-      updatePendingBadge();
-    });
-  };
-  if(window.NNP) start(); else window.addEventListener('nnpReady', start, {once:true});
+  const ok=await initFirebase();
+  if(ok){ renderMenu(); refreshAll(); renderSettings(); }
+  else toast('เชื่อมคลาวด์ไม่ได้ ใช้ข้อมูลในเครื่องนี้ก่อน');
 }
 
 document.addEventListener('DOMContentLoaded', async ()=>{
