@@ -549,7 +549,41 @@ function renderMenu(){
     });
     h+='</div>';
   });
+  /* ปุ่มกรอกราคาเอง */
+  h+='<h3 class="sec">กรอกราคาเอง</h3><div class="grid">'+
+     '<button class="item" data-custom="วัตถุมงคล"><span class="nm">วัตถุมงคล</span><span class="pr">กรอกราคาเอง</span></button>'+
+     '<button class="item" data-custom="กิจกรรมพิเศษ"><span class="nm">กิจกรรมพิเศษ</span><span class="pr">กรอกราคาเอง</span></button>'+
+     '</div>';
   $('#menu').innerHTML=h;
+}
+/* หน้าต่างกรอกชื่อ + ราคา สำหรับวัตถุมงคล / กิจกรรมพิเศษ */
+function customBox(cat){
+  const m=document.createElement('div'); m.id='modal';
+  m.innerHTML='<div class="mbox"><p>'+esc(cat)+' — กรอกรายการและราคา</p>'+
+    '<div style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px;text-align:left">'+
+      '<label style="font-size:.8rem;opacity:.75">ชื่อรายการ (ไม่ใส่ก็ได้)</label>'+
+      '<input id="cx-name" placeholder="เช่น ตะกรุดโทน / กิจกรรมจุดเทียน" style="padding:12px;border-radius:11px;border:1px solid var(--line);background:var(--surface2);color:var(--ink);font-size:1rem">'+
+      '<label style="font-size:.8rem;opacity:.75">ราคา (บาท)</label>'+
+      '<input id="cx-price" type="number" inputmode="numeric" min="0" placeholder="0" style="padding:12px;border-radius:11px;border:1px solid var(--line);background:var(--surface2);color:var(--ink);font-size:1.25rem;font-weight:700;text-align:right">'+
+      '<label style="font-size:.8rem;opacity:.75">จำนวน</label>'+
+      '<input id="cx-qty" type="number" inputmode="numeric" min="1" value="1" style="padding:12px;border-radius:11px;border:1px solid var(--line);background:var(--surface2);color:var(--ink);font-size:1rem;text-align:right">'+
+    '</div>'+
+    '<div class="mbtns"><button class="no">ยกเลิก</button><button class="yes">เพิ่มลงบิล</button></div></div>';
+  document.body.appendChild(m);
+  const close=()=>m.remove();
+  m.querySelector('.no').onclick=close;
+  const add=()=>{
+    const name=m.querySelector('#cx-name').value.trim();
+    const price=parseFloat(m.querySelector('#cx-price').value)||0;
+    const qty=Math.max(1, parseInt(m.querySelector('#cx-qty').value)||1);
+    if(price<=0){ toast('กรอกราคาก่อนค่ะ'); m.querySelector('#cx-price').focus(); return; }
+    cart.push({id:'c'+Date.now()+Math.random().toString(36).slice(2,5), name: name? cat+' — '+name : cat, price, cat, qty});
+    close(); renderMenu(); renderCart();
+    toast('เพิ่ม '+(name||cat)+' '+money(price)+' ฿ แล้ว');
+  };
+  m.querySelector('.yes').onclick=add;
+  m.querySelector('#cx-price').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); add(); }});
+  setTimeout(()=>m.querySelector('#cx-name').focus(),50);
 }
 function addToCart(id){
   const it=ITEMS.find(i=>i.id===id); if(!it) return;
@@ -914,6 +948,7 @@ $('#logout').onclick=()=>confirmBox('ออกจากระบบใช่ไ�
 $$('nav button').forEach(b=>b.onclick=()=>showTab(b.dataset.tab));
 
 $('#menu').addEventListener('click',e=>{
+  const c=e.target.closest('[data-custom]'); if(c){ customBox(c.dataset.custom); return; }
   const b=e.target.closest('[data-add]'); if(b) addToCart(b.dataset.add);
 });
 $('#cartlist').addEventListener('click',e=>{
